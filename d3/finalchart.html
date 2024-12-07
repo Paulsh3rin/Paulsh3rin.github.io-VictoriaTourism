@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather and ferry traffic</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            background-color: #000000;  /* Black background */
+            color: #f4f4f4;  /* Off-white font color */
+            font-family: Arial, sans-serif;  /* Optional: Set font for better readability */
+        }
+
+        .axis path, .axis line {
+            fill: none;
+            shape-rendering: crispEdges;
+        }
+
+        .tick text {
+            font-size: 16px;
+        }
+
+        .dropdown-container {
+            margin-top: 50px;
+            margin-bottom: 30px;
+            padding: 10px;
+            display: flex;
+            justify-content: center;
+            font-size: 25px;
+        }
+
+        .dropdown {
+            padding: 20px 20px;
+            width: 116px;
+            font-size: 30px;
+        }
+        
+        svg {
+            padding: 10px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size:40px;
+            margin-top: 50px;
+        }
+
+        .chart-container {
+            margin:20px;
+            display: flex;
+            justify-content: space-around;
+        }
+
+        .chart1, .chart2, .p {
+            flex: 1;
+            margin: 20px;
+            padding: 5px;
+            text-align: center;
+            font-size: 25px;
+        }
+
+    </style>
+</head>
+<body>
+    <h1>How temperature affected ferry arrival to Swartz Bay </h1>
+
+    <div class="dropdown-container">
+        <select id="year-select" class="dropdown"></select>
+    </div>
+
+    <!-- Container for both charts -->
+    <div class="chart-container">
+        <!-- First Chart: Weather Data -->
+        <div class="chart1">
+            <svg id="weather-chart" viewBox="0 0 900 400" preserveAspectRatio="xMidYMid meet"></svg>
+            <p id="Chart1-Title"> Temperature in Victoria</p>
+        </div>
+
+        <!-- Second Chart: Passenger Arrival Data -->
+        <div class="chart2">
+            <svg id="arrivals-chart" viewBox="0 0 900 400" preserveAspectRatio="xMidYMid meet"></svg>
+            <p id="Chart2-title"> People arrived at Swartz Bay Terminal</p>
+        </div>
+    </div>
+
+    <script>
+        const csvFilePathWeather = "weather_cleaned.csv";
+        const csvFilePathArrivals = "SWB_arrivals.csv";
+
+        // Load both datasets
+        Promise.all([d3.csv(csvFilePathWeather), d3.csv(csvFilePathArrivals)]).then(function([weatherData, arrivalsData]) {
+            // Process weather data
+            weatherData.forEach(d => {
+                d.date = d.date;
+                d.tmin = +d.tmin;
+                d.tmax = +d.tmax;
+                d.year = new Date(d.date).getFullYear();
+                d.month = new Date(d.date).toLocaleString('default', { month: 'long' });
+            });
+
+            // Process passenger arrivals data
+            arrivalsData.forEach(function(d) {
+                d.Passenger_Arrivals = +d.Passenger_Arrivals;
+                d.Year = +d.Year;
+                d.Month = +d.Month;  // Assuming `Month` is in integer format (1-12)
+            });
+
+            // Get unique years for dropdown
+            const yearsWeather = [...new Set(weatherData.map(d => d.year))];
+            const yearsArrivals = [...new Set(arrivalsData.map(d => d.Year))];
+            const years = [...new Set([...yearsWeather, ...yearsArrivals])];
+
+            const yearSelect = document.getElementById('year-select');
+            years.forEach(year => {
+                const option = document.createElement('option');
+                option.value = year;
+                option.text = year;
+                yearSelect.appendChild(option);
+            });
+
+            // Event listener to update both charts
+            yearSelect.addEventListener('change', updateCharts);
+
+            function updateCharts() {
+                const selectedYear = +yearSelect.value;
+
+                // Filter weather data by selected year
+                const filteredWeatherData = weatherData.filter(d => d.year === selectedYear);
+                const minTemps = filteredWeatherData.map(d => d.tmin);
+                const maxTemps = filteredWeatherData.map(d => d.tmax);
+                const minTemp = Math.min(...minTemps);
+                const maxTemp = Math.max(...maxTemps);
+                const temperatureRange = [minTemp, 16, 24, maxTemp];
+
+                // Create the diverging color scale for weather chart
+                const colorScale = d3.scaleLinear()
+                    .domain(temperatureRange)
+                    .range(["#6dbad1","#f47223","#fd1e1d"]);
+
+                const weatherSvg = d3.select("#weather-chart");
+                weatherSvg.selectAll("*").remove();
+                const weatherMargin = { top: 40, right: 20, bottom: 40, left: 80 };
+                const weatherWidth = 800 - weatherMargin.left - weatherMargin.right;
+                const weatherHeight = 400 - weatherMargin.top - weatherMargin.bottom;
+                const weatherG = weatherSvg.append("g").attr("transform", `translate(${weatherMargin.left},${weatherMargin.top})`);
+
+                const xScale = d3.scaleLinear().domain([minTemp, maxTemp]).range([0, weatherWidth]);
+                const yScale = d3.scaleBand().domain(filteredWeatherData.map(d => d.month)).range([0, weatherHeight]).padding(0.1);
+
+                weatherG.selectAll(".bar")
+                    .data(filteredWeatherData)
+                    .enter().append("rect")
+                    .attr("class", "bar")
+                    .attr("x", d => xScale(d.tmin))
+                    .attr("y", d => yScale(d.month))
+                    .attr("width", d => xScale(d.tmax) - xScale(d.tmin))
+                    .attr("height", yScale.bandwidth())
+                    .attr("fill", d => colorScale(d.tmin))
+
+                const xAxis = d3.axisBottom(xScale).ticks(5);
+                const yAxis = d3.axisLeft(yScale);
+                weatherG.append("g").attr("transform", `translate(0, ${weatherHeight})`).call(xAxis);
+                weatherG.append("g").call(yAxis);
+
+                // Filter and update passenger arrivals chart
+                const filteredArrivalsData = arrivalsData.filter(d => d.Year === selectedYear);
+                filteredArrivalsData.forEach(d => {
+                    const monthName = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][d.Month - 1];
+                    d.Month_Year = `${monthName}`;
+                });
+                filteredArrivalsData.sort((a, b) => ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].indexOf(a.Month_Year) - ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].indexOf(b.Month_Year));
+
+                const arrivalsSvg = d3.select("#arrivals-chart");
+                arrivalsSvg.selectAll("*").remove();
+                const arrivalsMargin = { top: 20, right: 30, bottom: 40, left: 150 };
+                const arrivalsWidth = 800 - arrivalsMargin.left - arrivalsMargin.right;
+                const arrivalsHeight = 400 - arrivalsMargin.top - arrivalsMargin.bottom;
+                const arrivalsG = arrivalsSvg.append("g").attr("transform", `translate(${arrivalsMargin.left},${arrivalsMargin.top})`);
+
+                const xArrivals = d3.scaleLinear().range([0, arrivalsWidth]).domain([0, d3.max(filteredArrivalsData, d => d.Passenger_Arrivals)]);
+                const yArrivals = d3.scaleBand().padding(0.1).range([0, arrivalsHeight]).domain(filteredArrivalsData.map(d => d.Month_Year));
+
+                arrivalsG.selectAll(".bar")
+                    .data(filteredArrivalsData)
+                    .enter().append("rect")
+                    .attr("class", "bar")
+                    .attr("x", 0)
+                    .attr("y", d => yArrivals(d.Month_Year))
+                    .attr("width", d => xArrivals(d.Passenger_Arrivals))
+                    .attr("height", yArrivals.bandwidth())
+                    .attr("fill", "steelblue")
+
+                const xAxisArrivals = d3.axisBottom(xArrivals).ticks(5);
+                const yAxisArrivals = d3.axisLeft(yArrivals);
+                arrivalsG.append("g").attr("transform", `translate(0, ${arrivalsHeight})`).call(xAxisArrivals);
+                arrivalsG.append("g").call(yAxisArrivals);
+            }
+
+            // Initialize charts with the first year
+            updateCharts();
+        });
+    </script>
+</body>
+</html>
